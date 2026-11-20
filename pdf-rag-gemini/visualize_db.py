@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PERSIST_DIR = os.getenv("PERSIST_DIR", "./chroma_db")
+from rag_pipeline import get_chroma_client, PERSIST_DIR
 
 st.set_page_config(page_title="ChromaDB Visualizer", layout="wide")
 st.title("ChromaDB Vector Store Explorer")
@@ -17,7 +17,7 @@ if not os.path.exists(PERSIST_DIR):
     st.stop()
 
 # Initialize Chroma client
-client = chromadb.PersistentClient(path=PERSIST_DIR)
+client = get_chroma_client()
 collections = client.list_collections()
 
 if not collections:
