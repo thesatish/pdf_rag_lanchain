@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_core.embeddings.fake import FakeEmbeddings
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import rag_pipeline
 
@@ -90,6 +90,18 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertEqual(len(result["docs"]), 1)
         self.assertEqual(result["docs"][0].metadata["page"], 0)
         self.assertIn("LangChain and Gemini", result["answer"])
+
+    @patch("rag_pipeline.ChatGoogleGenerativeAI")
+    def test_transcribe_audio(self, mock_chat_cls):
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = MagicMock(content="What are the key security practices?")
+        mock_chat_cls.return_value = mock_llm
+
+        dummy_audio = b"RIFF\x00\x00\x00\x00WAVEfmt "
+        transcript = rag_pipeline.transcribe_audio(dummy_audio, mime_type="audio/wav")
+
+        self.assertEqual(transcript, "What are the key security practices?")
+        mock_llm.invoke.assert_called_once()
 
     def test_streamlit_app_compilation(self):
         app_path = os.path.join(PROJECT_DIR, "app.py")

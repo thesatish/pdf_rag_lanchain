@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from rag_pipeline import ingest_pdf, build_rag_chain
+from rag_pipeline import ingest_pdf, build_rag_chain, transcribe_audio, get_chroma_client
 
 PERSIST_DIR = os.getenv("PERSIST_DIR", "./chroma_db")
 
@@ -56,18 +56,52 @@ with tab_chat:
     if "rag_chain" not in st.session_state:
         st.info("Upload a PDF in the sidebar to start asking questions.")
     else:
+        # Display existing message history
         for msg in st.session_state.get("messages", []):
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        if question := st.chat_input("Ask a question about your PDF..."):
-            st.session_state["messages"].append({"role": "user", "content": question})
+        # Voice input expander
+        with st.expander("🎙️ Ask via Voice", expanded=False):
+            st.caption("Record your question using your microphone. Gemini will transcribe and search your document.")
+            voice_recording = st.audio_input("Record a voice question", key="voice_recorder")
+            if voice_recording is not None:
+                audio_bytes = voice_recording.getvalue()
+                audio_hash = f"audio_{hash(audio_bytes)}"
+                if st.session_state.get("last_processed_audio") != audio_hash:
+                    st.session_state["last_processed_audio"] = audio_hash
+                    with st.spinner("Transcribing your voice question with Gemini..."):
+                        try:
+                            transcribed_text = transcribe_audio(
+                                audio_bytes,
+                                mime_type=voice_recording.type or "audio/wav"
+                            )
+                            if transcribed_text and transcribed_text.lower() != "no speech detected.":
+                                st.session_state["pending_voice_question"] = transcribed_text
+                                st.rerun()
+                            else:
+                                st.warning("No speech detected in audio. Please try speaking again.")
+                        except Exception as e:
+                            st.error(f"Error transcribing audio: {e}")
+
+        # Check for user question from either voice or text
+        user_question = None
+        is_voice = False
+        if "pending_voice_question" in st.session_state:
+            user_question = st.session_state.pop("pending_voice_question")
+            is_voice = True
+        elif text_question := st.chat_input("Ask a question about your PDF (or use voice above)..."):
+            user_question = text_question
+
+        if user_question:
+            display_text = f"🎙️ {user_question}" if is_voice else user_question
+            st.session_state["messages"].append({"role": "user", "content": display_text})
             with st.chat_message("user"):
-                st.markdown(question)
+                st.markdown(display_text)
 
             with st.chat_message("assistant"):
                 with st.spinner("Searching document and generating answer..."):
-                    result = st.session_state["rag_chain"].invoke(question)
+                    result = st.session_state["rag_chain"].invoke(user_question)
                     answer = result["answer"]
                     st.markdown(answer)
 
@@ -84,7 +118,7 @@ with tab_db:
     if not os.path.exists(PERSIST_DIR):
         st.info(f"Vector database not found at `{PERSIST_DIR}`. Ingest a document first.")
     else:
-        client = chromadb.PersistentClient(path=PERSIST_DIR)
+        client = get_chroma_client()
         all_cols = client.list_collections()
 
         if not all_cols:

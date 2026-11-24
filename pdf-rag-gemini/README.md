@@ -13,7 +13,7 @@ Upload any PDF document, automatically chunk and index it into a vector store, a
 - **ChromaDB Vector Store:** Persists indexed documents locally for fast similarity retrieval.
 - **LCEL RAG Pipeline:** Composable LangChain Expression Language (LCEL) chain combining similarity search, system prompt formatting with page citations, and `gemini-3.8-flash`.
 - **Interactive Streamlit Interface:**
-  - **💬 Chat Q&A:** Chatbot UI displaying answers and expandable source context cards with page references.
+  - **💬 Chat Q&A:** Chatbot UI supporting both typed questions and **🎙️ Voice Questions** (microphone recording with Gemini multimodal speech transcription).
   - **📊 ChromaDB Explorer:** Inspect indexed collections, search chunks, view metadata, and visualize high-dimensional embeddings in **2D PCA space**.
 - **Configurable Environment:** Centralized control over API keys, models, and database paths via `.env`.
 
