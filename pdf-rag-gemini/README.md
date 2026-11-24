@@ -1,133 +1,78 @@
-# PDF Q&A with Gemini RAG
+# Extended Multi-Phase PDF RAG System with Gemini, LangChain, FastAPI & Angular
 
-A Document Question-Answering (RAG) AI Agent powered by **LangChain**, **Google Gemini** (`gemini-3.8-flash` & `gemini-embedding-2`), **ChromaDB**, and **Streamlit**.
+A modular, enterprise-grade Document Question-Answering (RAG) system powered by **LangChain**, **Google Gemini** (`gemini-3.8-flash` & `gemini-embedding-2`), **ChromaDB**, **FastAPI**, **Angular 19**, and **Streamlit**.
 
-Upload any PDF document, automatically chunk and index it into a vector store, and ask contextual questions. The assistant answers strictly using the document context and cites exact page numbers.
-
----
-
-## Features
-
-- **Document Ingestion & Chunking:** Loads multi-page PDFs using `PyPDFLoader` and splits them into overlapping chunks using `RecursiveCharacterTextSplitter`.
-- **Gemini Embeddings:** Generates vector embeddings using `gemini-embedding-2`.
-- **ChromaDB Vector Store:** Persists indexed documents locally for fast similarity retrieval.
-- **LCEL RAG Pipeline:** Composable LangChain Expression Language (LCEL) chain combining similarity search, system prompt formatting with page citations, and `gemini-3.8-flash`.
-- **Interactive Streamlit Interface:**
-  - **💬 Chat Q&A:** Chatbot UI supporting both typed questions and **🎙️ Voice Questions** (microphone recording with Gemini multimodal speech transcription).
-  - **📊 ChromaDB Explorer:** Inspect indexed collections, search chunks, view metadata, and visualize high-dimensional embeddings in **2D PCA space**.
-- **Configurable Environment:** Centralized control over API keys, models, and database paths via `.env`.
+Both frontends are fully supported and can be run simultaneously or independently:
+1. **Modern Angular SPA (`../frontend`) + FastAPI REST Backend (`server.py`)**
+2. **Streamlit Application (`app.py`)**
 
 ---
 
-## Project Structure
+## 5-Phase Learning Roadmap
 
-```text
-pdf-rag-gemini/
-├── .env                # Google Gemini API key and model configurations
-├── requirements.txt    # Python package dependencies
-├── rag_pipeline.py     # Core LangChain PDF ingestion & LCEL RAG logic
-├── app.py              # Streamlit web interface (Chat + ChromaDB Explorer)
-├── visualize_db.py     # Standalone ChromaDB visualizer dashboard
-├── sample.pdf          # Sample multi-page PDF for testing
-├── test_rag.py         # Automated test suite (unit & integration tests)
-└── chroma_db/          # Persistent local Chroma vector database
-```
+1. **Phase 1 — Refactored Modular RAG:** Decoupled Ingestion, Retrieval, and Generation modules with persistent database reuse (no re-ingesting required).
+2. **Phase 2 — Full Document Management:** Multi-PDF support, batch uploads, document updates/replacements, deletion, metadata enrichment, and SHA-256 duplicate prevention.
+3. **Phase 3 — Advanced Retrieval & Debugging:** Maximal Marginal Relevance (MMR), similarity score thresholds, metadata filtering, and interactive telemetry/diagnostics.
+4. **Phase 4 — RAG Evaluation:** Automated synthetic benchmark dataset generation (triplets of Question, Context, Ground-Truth Answer), measuring Recall@k, Context Relevance, Faithfulness, Answer Relevance, and Token F1.
+5. **Phase 5 — Advanced RAG Techniques:** Multi-query expansion / rewriting, hybrid search (Sparse BM25 + Dense Chroma with Reciprocal Rank Fusion), LLM-based reranking, and contextual compression.
 
 ---
 
-## Installation & Setup
+## REST API Endpoints in `server.py`
 
-### 1. Prerequisites
-- Python 3.9+ (Python 3.10+ recommended)
-- A Google Gemini API key from [Google AI Studio](https://aistudio.google.com/)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Healthcheck and model configuration readiness |
+| `GET` | `/api/collections` | List all available ChromaDB collections and chunk counts |
+| `POST` | `/api/collections` | Create or switch active Chroma collection |
+| `DELETE` | `/api/collections/{name}` | Delete a Chroma collection |
+| `GET` | `/api/documents` | List all unique documents and metadata in collection |
+| `POST` | `/api/documents/upload` | Upload & ingest multiple PDFs with SHA-256 duplicate prevention |
+| `DELETE` | `/api/documents/{filename}` | Delete all chunks associated with a specific document |
+| `POST` | `/api/documents/update` | Atomically replace an existing document with a new PDF version |
+| `POST` | `/api/chat` | Chat Q&A with Standard RAG or Advanced RAG (Phase 5) |
+| `POST` | `/api/transcribe-audio` | Transcribe speech audio using Gemini multimodal capabilities |
+| `POST` | `/api/retrieve/debug` | Retrieval diagnostics: latency in ms, similarity scores, ranks, metadata |
+| `POST` | `/api/eval/generate-dataset` | Generate synthetic benchmark QA dataset with Gemini |
+| `POST` | `/api/eval/run` | Execute evaluation benchmark (Recall@k, Faithfulness, Relevance, F1) |
+| `GET` | `/api/explorer` | Inspect chunks, token lengths, and 2D PCA projection coordinates |
 
-### 2. Create and Activate Virtual Environment
+---
 
+## How to Run
+
+### 1. Launch FastAPI Backend
 ```bash
 cd pdf-rag-gemini
-
-# Create virtual environment
-python3 -m venv venv
-
-# Activate on macOS / Linux:
 source venv/bin/activate
-
-# (On Windows):
-# .\venv\Scripts\activate
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
+Interactive Swagger docs: **`http://localhost:8000/docs`**
 
-### 3. Install Dependencies
-
+### 2. Launch Angular 19 Frontend
 ```bash
-pip install --upgrade pip
-pip install -r requirements.txt
+cd ../frontend
+npm start
 ```
+Access at: **`http://localhost:4200`**
 
----
-
-## Configuration
-
-Edit the `.env` file in the `pdf-rag-gemini/` directory:
-
-```env
-# Google Gemini API Key
-GOOGLE_API_KEY=your_gemini_api_key_here
-
-# Model Configurations & Persistence
-EMBEDDING_MODEL=gemini-embedding-2
-LLM_MODEL=gemini-3.8-flash
-PERSIST_DIR=./chroma_db
-```
-
----
-
-## Running the Application
-
-### Launch the Streamlit App
-
+### 3. Launch Streamlit App (Optional)
 ```bash
+cd pdf-rag-gemini
+source venv/bin/activate
 streamlit run app.py
 ```
-
-Open your browser at **`http://localhost:8501`**.
-
-### Usage
-1. In the sidebar, click **"Choose a PDF file"** and upload your document (or test with `sample.pdf`).
-2. Wait for the status indicator: `Indexed: <your-document>.pdf`.
-3. In the **"💬 Chat Q&A"** tab, ask any question about your document.
-4. Click **"View retrieved source chunks"** under any answer to inspect the exact context and page numbers used by the model.
-
----
-
-## Visualizing ChromaDB Vector Store
-
-You have multiple options to visualize the data stored in ChromaDB:
-
-### 1. Built-in Explorer (In `app.py`)
-Navigate to the **"📊 ChromaDB Explorer"** tab in your running Streamlit app:
-- **Metrics:** Total chunks, embedding dimensions, and active collection name.
-- **Searchable Table:** Filter chunks by keyword, view character counts and page numbers.
-- **2D PCA Semantic Projection:** Interactive scatter plot showing how chunks cluster in vector space.
-
-### 2. Standalone Visualizer Dashboard
-Run the dedicated database visualizer on a separate port:
-
-```bash
-streamlit run visualize_db.py --server.port 8502
-```
-Access at **`http://localhost:8502`**.
-
-### 3. Direct SQLite Database Inspection
-ChromaDB persists metadata and document content in `chroma_db/chroma.sqlite3`:
-- **VS Code:** Install the **SQLite Viewer** extension and click `chroma_db/chroma.sqlite3`.
-- **Desktop GUI:** Open with [DB Browser for SQLite](https://sqlitebrowser.org/).
+Access at: **`http://localhost:8501`**
 
 ---
 
 ## Running Tests
 
-An automated test suite is included to verify all components (document loading, chunking, Chroma indexing, RAG chain execution, and Streamlit compilation):
-
 ```bash
-python test_rag.py
+cd pdf-rag-gemini
+source venv/bin/activate
+
+python test_rag.py              # Core tests (6 passed)
+python test_extended_phases.py  # Phase 1-5 tests (15 passed)
+python test_api.py              # FastAPI tests (4 passed)
 ```
