@@ -1,0 +1,607 @@
+<div class="rag-app-container">
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-box">📚</div>
+      <div>
+        <h1 class="app-title">Gemini PDF RAG</h1>
+        <p class="app-subtitle">Angular Frontend + FastAPI Backend + ChromaDB</p>
+      </div>
+    </div>
+
+    <!-- Collection Toolbar -->
+    <div class="header-center">
+      <div class="collection-picker">
+        <label>Active Collection:</label>
+        <select [(ngModel)]="activeCollection" (change)="onCollectionChanged()" class="collection-select">
+          <option *ngFor="let c of collections" [value]="c.name">
+            {{ c.name }} ({{ c.count }} chunks)
+          </option>
+          <option *ngIf="!collections.length" [value]="activeCollection">
+            {{ activeCollection }} (0 chunks)
+          </option>
+        </select>
+      </div>
+
+      <div class="collection-actions">
+        <input
+          type="text"
+          placeholder="New collection name..."
+          [(ngModel)]="newCollectionName"
+          class="new-collection-input"
+        />
+        <button class="btn btn-secondary btn-sm" (click)="createCollection()" [disabled]="!newCollectionName.trim() || isCreatingCollection">
+          ➕ Create
+        </button>
+        <button class="btn btn-danger btn-sm" (click)="deleteActiveCollection()" title="Delete Active Collection">
+          🗑️
+        </button>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <span class="status-pill" [class.online]="healthStatus?.status === 'ok'">
+        <span class="status-dot"></span>
+        {{ healthStatus?.status === 'ok' ? 'FastAPI Online' : 'Connecting...' }}
+      </span>
+      <span class="model-badge" *ngIf="healthStatus?.llm_model">
+        ⚡ {{ healthStatus?.llm_model }}
+      </span>
+    </div>
+  </header>
+
+  <!-- NAVIGATION TABS -->
+  <nav class="app-tabs">
+    <button class="tab-btn" [class.active]="activeTab === 'chat'" (click)="switchTab('chat')">
+      💬 Chat & Q&A
+    </button>
+    <button class="tab-btn" [class.active]="activeTab === 'docs'" (click)="switchTab('docs')">
+      📁 Document Management
+    </button>
+    <button class="tab-btn" [class.active]="activeTab === 'retrieval'" (click)="switchTab('retrieval')">
+      🔍 Advanced Retrieval & Debugger
+    </button>
+    <button class="tab-btn" [class.active]="activeTab === 'eval'" (click)="switchTab('eval')">
+      📈 RAG Evaluation
+    </button>
+    <button class="tab-btn" [class.active]="activeTab === 'explorer'" (click)="switchTab('explorer')">
+      📊 ChromaDB Explorer
+    </button>
+  </nav>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="app-main">
+    <!-- ===================================================================== -->
+    <!-- TAB 1: CHAT & Q&A -->
+    <!-- ===================================================================== -->
+    <section *ngIf="activeTab === 'chat'" class="tab-content chat-section">
+      <!-- Chat Config Bar -->
+      <div class="chat-config-bar">
+        <div class="mode-selector">
+          <label class="radio-label">
+            <input type="radio" [(ngModel)]="ragMode" value="standard" name="ragMode" />
+            Standard RAG
+          </label>
+          <label class="radio-label">
+            <input type="radio" [(ngModel)]="ragMode" value="advanced" name="ragMode" />
+            🚀 Advanced RAG (Phase 5)
+          </label>
+        </div>
+
+        <div class="advanced-toggles" *ngIf="ragMode === 'advanced'">
+          <label class="toggle-pill">
+            <input type="checkbox" [(ngModel)]="useQueryRewriting" />
+            ✍️ Query Rewriting
+          </label>
+          <label class="toggle-pill">
+            <input type="checkbox" [(ngModel)]="useHybrid" />
+            🔀 Hybrid BM25
+          </label>
+          <label class="toggle-pill">
+            <input type="checkbox" [(ngModel)]="useReranking" />
+            🎯 Reranker
+          </label>
+          <label class="toggle-pill">
+            <input type="checkbox" [(ngModel)]="useCompression" />
+            ✂️ Compression
+          </label>
+        </div>
+      </div>
+
+      <!-- Chat History -->
+      <div class="chat-messages-container">
+        <div *ngIf="messages.length === 0" class="empty-chat-state">
+          <div class="empty-icon">🤖</div>
+          <h3>Ask questions about your documents</h3>
+          <p>Active collection: <code>{{ activeCollection }}</code></p>
+          <p class="empty-hint">Type a question below or upload audio to transcribe with Gemini.</p>
+        </div>
+
+        <div *ngFor="let msg of messages; let i = index" class="message-bubble" [class.user]="msg.role === 'user'" [class.assistant]="msg.role === 'assistant'">
+          <div class="message-header">
+            <span class="sender-name">{{ msg.role === 'user' ? '🧑 You' : '🤖 Gemini RAG' }}</span>
+            <span class="message-time">{{ msg.timestamp }}</span>
+          </div>
+          <div class="message-body">{{ msg.content }}</div>
+
+          <!-- Sources Accordion -->
+          <div *ngIf="msg.sources && msg.sources.length > 0" class="sources-container">
+            <button class="sources-toggle-btn" (click)="toggleSources(i)">
+              📑 {{ expandedSourceMessageIndex === i ? 'Hide Source Citations' : 'View ' + msg.sources.length + ' Source Citations' }}
+            </button>
+            <div *ngIf="expandedSourceMessageIndex === i" class="sources-list">
+              <div *ngFor="let src of msg.sources; let sIdx = index" class="source-card">
+                <div class="source-card-header">
+                  <span class="source-doc-badge">📄 {{ src.filename }}</span>
+                  <span class="source-page-badge">Page {{ src.page }}</span>
+                </div>
+                <div class="source-content">{{ src.content }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div *ngIf="isChatLoading" class="message-bubble assistant loading">
+          <div class="loading-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="loading-label">Searching vector space and generating answer...</span>
+        </div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="chat-input-area">
+        <div class="audio-input-wrapper">
+          <label class="audio-btn" title="Upload speech audio to transcribe">
+            🎙️ {{ isTranscribing ? 'Transcribing...' : 'Voice' }}
+            <input type="file" accept="audio/*" (change)="onAudioSelected($event)" [disabled]="isTranscribing" hidden />
+          </label>
+        </div>
+        <textarea
+          [(ngModel)]="queryText"
+          (keydown.enter)="$event.preventDefault(); sendMessage()"
+          placeholder="Ask a question about your indexed PDF documents... (Enter to send)"
+          rows="2"
+          class="chat-textarea"
+        ></textarea>
+        <button class="btn btn-primary send-btn" (click)="sendMessage()" [disabled]="!queryText.trim() || isChatLoading">
+          ➤ Send
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 2: DOCUMENT MANAGEMENT (PHASE 2) -->
+    <!-- ===================================================================== -->
+    <section *ngIf="activeTab === 'docs'" class="tab-content docs-section">
+      <div class="section-card upload-card">
+        <h3>📤 Upload & Ingest Documents</h3>
+        <p class="section-desc">Add one or multiple PDFs to collection <code>{{ activeCollection }}</code>.</p>
+
+        <div class="upload-controls">
+          <input type="file" multiple accept=".pdf" (change)="onFilesSelected($event)" class="file-input" />
+          <label class="checkbox-label">
+            <input type="checkbox" [(ngModel)]="preventDuplicates" />
+            Prevent Duplicate Ingestion (SHA-256 Hash Matching)
+          </label>
+          <button class="btn btn-primary" (click)="uploadDocuments()" [disabled]="!selectedFilesToUpload.length || isUploading">
+            {{ isUploading ? '⏳ Ingesting Files...' : '📥 Ingest ' + selectedFilesToUpload.length + ' File(s)' }}
+          </button>
+        </div>
+
+        <div *ngIf="uploadAlert" class="alert-box" [class.alert-success]="uploadAlert.type === 'success'" [class.alert-info]="uploadAlert.type === 'info'" [class.alert-error]="uploadAlert.type === 'error'">
+          {{ uploadAlert.message }}
+        </div>
+      </div>
+
+      <!-- Document Inventory Table -->
+      <div class="section-card">
+        <div class="card-header-flex">
+          <h3>📁 Document Inventory</h3>
+          <button class="btn btn-secondary btn-sm" (click)="loadDocuments()">🔄 Refresh</button>
+        </div>
+
+        <div *ngIf="!documents.length" class="empty-state">
+          <p>No documents found in this collection. Upload PDFs above to begin.</p>
+        </div>
+
+        <div *ngIf="documents.length > 0" class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Document Name</th>
+                <th>Total Pages</th>
+                <th>Chunks</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th>SHA-256 Hash</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let doc of documents">
+                <td class="bold">📄 {{ doc.filename }}</td>
+                <td>{{ doc.total_pages }}</td>
+                <td><span class="badge badge-purple">{{ doc.chunk_count }}</span></td>
+                <td>{{ (doc.file_size / 1024).toFixed(1) }} KB</td>
+                <td class="caption">{{ doc.upload_time | date:'short' }}</td>
+                <td><code class="hash-code">{{ doc.file_hash.substring(0, 10) }}...</code></td>
+                <td>
+                  <button class="btn btn-danger btn-xs" (click)="deleteDocument(doc.filename)">
+                    🗑️ Delete
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Update / Replace Document Form -->
+      <div class="section-card update-card" *ngIf="documents.length > 0">
+        <h3>🔄 Replace / Update Existing Document</h3>
+        <p class="section-desc">Atomically delete previous chunks and index an updated PDF version.</p>
+        <div class="form-row">
+          <select [(ngModel)]="updateTargetDoc" class="form-select">
+            <option value="" disabled selected>Select document to replace</option>
+            <option *ngFor="let doc of documents" [value]="doc.filename">{{ doc.filename }}</option>
+          </select>
+          <input type="file" accept=".pdf" (change)="onUpdateFileSelected($event)" class="file-input" />
+          <button class="btn btn-secondary" (click)="updateDocument()" [disabled]="!updateTargetDoc || !updateFile || isUpdating">
+            {{ isUpdating ? 'Updating...' : 'Replace Document' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 3: ADVANCED RETRIEVAL & DEBUGGER (PHASE 3) -->
+    <!-- ===================================================================== -->
+    <section *ngIf="activeTab === 'retrieval'" class="tab-content retrieval-section">
+      <div class="section-card config-card">
+        <h3>⚙️ Retrieval Strategy & Hyperparameters</h3>
+        <div class="retrieval-controls-grid">
+          <div class="control-group">
+            <label>Search Algorithm:</label>
+            <select [(ngModel)]="searchType" class="form-select">
+              <option value="similarity">Similarity Search (Dense Cosine/L2)</option>
+              <option value="mmr">MMR (Maximal Marginal Relevance)</option>
+              <option value="similarity_score_threshold">Score Threshold Cutoff</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Top K Chunks ({{ retrievalK }}):</label>
+            <input type="range" min="1" max="10" [(ngModel)]="retrievalK" class="slider" />
+          </div>
+
+          <div class="control-group" *ngIf="searchType === 'mmr'">
+            <label>MMR Fetch K ({{ retrievalFetchK }}):</label>
+            <input type="range" [min]="retrievalK" max="30" [(ngModel)]="retrievalFetchK" class="slider" />
+          </div>
+
+          <div class="control-group" *ngIf="searchType === 'mmr'">
+            <label>Diversity Lambda ({{ retrievalLambda }}):</label>
+            <input type="range" min="0.0" max="1.0" step="0.05" [(ngModel)]="retrievalLambda" class="slider" />
+          </div>
+
+          <div class="control-group" *ngIf="searchType === 'similarity_score_threshold'">
+            <label>Score Cutoff Threshold ({{ retrievalScoreThreshold }}):</label>
+            <input type="range" min="0.0" max="1.0" step="0.05" [(ngModel)]="retrievalScoreThreshold" class="slider" />
+          </div>
+
+          <div class="control-group">
+            <label>Metadata Filter (Document):</label>
+            <select [(ngModel)]="metadataFilterDoc" class="form-select">
+              <option value="ALL">All Documents</option>
+              <option *ngFor="let doc of documents" [value]="doc.filename">{{ doc.filename }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="diagnostic-input-row">
+          <input
+            type="text"
+            [(ngModel)]="debugQuery"
+            placeholder="Enter query to diagnose retrieval performance..."
+            class="diagnostic-query-input"
+          />
+          <button class="btn btn-primary" (click)="runRetrievalDiagnostic()" [disabled]="!debugQuery.trim() || isDebugLoading">
+            {{ isDebugLoading ? 'Diagnosing...' : '🚀 Run Diagnostic' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Diagnostic Results -->
+      <div *ngIf="debugResult" class="diagnostic-results">
+        <!-- Telemetry Cards -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-value">{{ debugResult.latency_ms }} ms</div>
+            <div class="metric-label">Retrieval Latency</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value">{{ debugResult.num_retrieved }}</div>
+            <div class="metric-label">Chunks Retrieved</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value">{{ debugResult.search_type | uppercase }}</div>
+            <div class="metric-label">Search Strategy</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value">{{ debugResult.items[0].score || 'N/A' }}</div>
+            <div class="metric-label">Top Relevance Score</div>
+          </div>
+        </div>
+
+        <!-- Chunks Table -->
+        <div class="section-card">
+          <h4>Retrieved Chunks Telemetry</h4>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Score</th>
+                  <th>Document</th>
+                  <th>Page</th>
+                  <th>Length</th>
+                  <th>Content Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let it of debugResult.items" [class.selected-row]="it.rank === selectedInspectRank" (click)="selectedInspectRank = it.rank">
+                  <td><span class="badge badge-rank">#{{ it.rank }}</span></td>
+                  <td><span class="badge badge-score">{{ it.score }}</span></td>
+                  <td>📄 {{ it.filename }}</td>
+                  <td>Page {{ it.page }}</td>
+                  <td>{{ it.content_length }} chars</td>
+                  <td>{{ it.content_preview }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Full Inspector Box -->
+        <div class="section-card" *ngIf="getSelectedDebugItem() as chosen">
+          <h4>Inspect Chunk Content (Rank #{{ chosen.rank }})</h4>
+          <pre class="code-box">{{ chosen.full_content }}</pre>
+          <div class="meta-caption">
+            <strong>Metadata:</strong> <code>{{ chosen.metadata | json }}</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 4: RAG EVALUATION (PHASE 4) -->
+    <!-- ===================================================================== -->
+    <section *ngIf="activeTab === 'eval'" class="tab-content eval-section">
+      <div class="eval-grid">
+        <!-- 1. Dataset Generator -->
+        <div class="section-card">
+          <h3>⚡ 1. Synthetic Benchmark Generator</h3>
+          <p class="section-desc">Generate factual question-answer-context benchmark triplets using Gemini LLM.</p>
+          <div class="eval-control-row">
+            <label>Number of Test Questions ({{ numEvalQuestions }}):</label>
+            <input type="range" min="2" max="6" [(ngModel)]="numEvalQuestions" class="slider" />
+            <button class="btn btn-secondary" (click)="generateEvaluationDataset()" [disabled]="isGeneratingDataset">
+              {{ isGeneratingDataset ? 'Generating...' : '⚡ Generate Benchmark' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. Benchmark Preview -->
+        <div class="section-card">
+          <h3>📋 2. Benchmark Test Set ({{ evalDataset.length }} Items)</h3>
+          <div *ngIf="!evalDataset.length" class="empty-state">
+            <p>No benchmark dataset generated yet. Click "Generate Benchmark" to create one.</p>
+          </div>
+          <div *ngIf="evalDataset.length > 0" class="table-responsive max-h-200">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Question</th>
+                  <th>Ground Truth Answer</th>
+                  <th>Document</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let item of evalDataset">
+                  <td><code>{{ item.id }}</code></td>
+                  <td>{{ item.question }}</td>
+                  <td class="caption">{{ item.ground_truth_answer }}</td>
+                  <td>📄 {{ item.source_filename }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Evaluation Runner -->
+      <div class="section-card" *ngIf="evalDataset.length > 0">
+        <h3>🚀 3. Run RAG Quality Evaluation</h3>
+        <div class="eval-run-bar">
+          <label class="radio-label">
+            <input type="radio" [(ngModel)]="evalEngine" value="standard" name="evalEngine" />
+            Standard RAG
+          </label>
+          <label class="radio-label">
+            <input type="radio" [(ngModel)]="evalEngine" value="advanced" name="evalEngine" />
+            Advanced RAG (Phase 5)
+          </label>
+
+          <button class="btn btn-primary" (click)="runEvaluationBenchmark()" [disabled]="isRunningEval">
+            {{ isRunningEval ? 'Running Evaluation...' : '🏆 Evaluate Quality' }}
+          </button>
+        </div>
+
+        <!-- Results Display -->
+        <div *ngIf="evalResponse" class="eval-results-container">
+          <h4>🏆 Benchmark Score Summary</h4>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-value">{{ (evalResponse.summary.mean_recall_at_k * 100).toFixed(1) }}%</div>
+              <div class="metric-label">Recall &#64; K</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">{{ (evalResponse.summary.mean_context_relevance * 100).toFixed(1) }}%</div>
+              <div class="metric-label">Context Relevance</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">{{ (evalResponse.summary.mean_faithfulness * 100).toFixed(1) }}%</div>
+              <div class="metric-label">Faithfulness (No Hallucination)</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">{{ (evalResponse.summary.mean_answer_relevance * 100).toFixed(1) }}%</div>
+              <div class="metric-label">Answer Relevance</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">{{ (evalResponse.summary.mean_token_f1 * 100).toFixed(1) }}%</div>
+              <div class="metric-label">Token F1 Score</div>
+            </div>
+          </div>
+
+          <h4>Itemized Results Breakdown</h4>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Question</th>
+                  <th>Generated Answer</th>
+                  <th>Recall&#64;K</th>
+                  <th>Context Rel.</th>
+                  <th>Faithfulness</th>
+                  <th>Answer Rel.</th>
+                  <th>F1</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let r of evalResponse.results">
+                  <td class="bold">{{ r.question }}</td>
+                  <td>{{ r.predicted_answer }}</td>
+                  <td><span class="badge" [class.badge-green]="r.recall_at_k === 1" [class.badge-red]="r.recall_at_k === 0">{{ (r.recall_at_k * 100).toFixed(0) }}%</span></td>
+                  <td>{{ (r.context_relevance * 100).toFixed(0) }}%</td>
+                  <td><span class="badge badge-purple">{{ (r.faithfulness * 100).toFixed(0) }}%</span></td>
+                  <td>{{ (r.answer_relevance * 100).toFixed(0) }}%</td>
+                  <td>{{ (r.token_f1 * 100).toFixed(1) }}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- TAB 5: CHROMADB EXPLORER -->
+    <!-- ===================================================================== -->
+    <section *ngIf="activeTab === 'explorer'" class="tab-content explorer-section">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-value">{{ explorerData?.total_chunks || 0 }}</div>
+          <div class="metric-label">Total Indexed Chunks</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">{{ explorerData?.embedding_dim || 'N/A' }}</div>
+          <div class="metric-label">Embedding Dimensions</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">{{ activeCollection }}</div>
+          <div class="metric-label">ChromaDB Collection</div>
+        </div>
+      </div>
+
+      <div class="explorer-grid">
+        <!-- Chunks list & filter -->
+        <div class="section-card">
+          <div class="card-header-flex">
+            <h3>📄 Chunk Documents & Metadata</h3>
+            <input
+              type="text"
+              placeholder="🔍 Search chunks by keyword..."
+              [(ngModel)]="chunkFilterKeyword"
+              class="chunk-search-input"
+            />
+          </div>
+
+          <div class="table-responsive max-h-350">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Chunk ID</th>
+                  <th>Document</th>
+                  <th>Page</th>
+                  <th>Length</th>
+                  <th>Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  *ngFor="let c of getFilteredChunks()"
+                  [class.selected-row]="c.chunk_id === selectedInspectChunkId"
+                  (click)="selectedInspectChunkId = c.chunk_id"
+                >
+                  <td><code>{{ c.chunk_id }}</code></td>
+                  <td>📄 {{ c.filename }}</td>
+                  <td>Page {{ c.page }}</td>
+                  <td>{{ c.length }} chars</td>
+                  <td>{{ c.content.substring(0, 80) }}...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Inspect selected chunk -->
+          <div *ngIf="getSelectedChunkContent() as sel" class="chunk-inspect-box">
+            <h4>Inspect Chunk: <code>{{ sel.chunk_id }}</code></h4>
+            <pre class="code-box">{{ sel.content }}</pre>
+          </div>
+        </div>
+
+        <!-- 2D PCA Scatter Visualization -->
+        <div class="section-card">
+          <h3>🌌 2D PCA Semantic Projection</h3>
+          <p class="section-desc">Principal Component Analysis projected into 2D vector coordinates.</p>
+
+          <div *ngIf="!explorerData?.pca_points?.length" class="empty-state">
+            <p>At least 2 embeddings are required for 2D semantic projection.</p>
+          </div>
+
+          <div *ngIf="explorerData?.pca_points?.length" class="pca-container">
+            <!-- Document Color Legend -->
+            <div class="pca-legend">
+              <span *ngFor="let docName of getUniquePcaDocuments()" class="legend-item">
+                <span class="legend-color-dot" [style.background-color]="getDocumentColor(docName)"></span>
+                {{ docName }}
+              </span>
+            </div>
+
+            <svg viewBox="0 0 500 300" class="pca-svg">
+              <!-- Grid lines -->
+              <line x1="40" y1="150" x2="460" y2="150" stroke="#334155" stroke-dasharray="4" />
+              <line x1="250" y1="30" x2="250" y2="270" stroke="#334155" stroke-dasharray="4" />
+
+              <!-- Scatter points -->
+              <circle
+                *ngFor="let pt of explorerData?.pca_points"
+                [attr.cx]="getPcaSvgX(pt)"
+                [attr.cy]="getPcaSvgY(pt)"
+                r="6"
+                [attr.fill]="getDocumentColor(pt.filename)"
+                class="pca-dot"
+                (click)="selectedInspectChunkId = pt.chunk_id"
+              >
+                <title>{{ pt.filename }} (Page {{ pt.page }}) [{{ pt.chunk_id }}]</title>
+              </circle>
+            </svg>
+            <p class="caption text-center">Click any point to inspect chunk contents on the left.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
